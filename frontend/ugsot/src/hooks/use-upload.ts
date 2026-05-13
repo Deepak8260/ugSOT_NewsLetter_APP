@@ -24,7 +24,10 @@ export function useUploadEmployeeFile() {
       const data = await res.json();
       
       // Invalidate relevant queries
-      queryClient.invalidateQueries({ queryKey: getListEmployeesQueryKey() });
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) && query.queryKey[0] === "/api/employees",
+      });
       queryClient.invalidateQueries({ queryKey: getGetDashboardStatsQueryKey() });
       
       return data;

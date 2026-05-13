@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useListEmployees, useDeleteEmployee, getListEmployeesQueryKey } from "@workspace/api-client-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,13 +24,14 @@ export default function Employees() {
   const [employeeToDelete, setEmployeeToDelete] = useState<number | null>(null);
 
   // Debounce search
-  useState(() => {
+  useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
       setPage(1);
     }, 500);
+
     return () => clearTimeout(timer);
-  });
+  }, [search]);
 
   const { data, isLoading } = useListEmployees(
     { search: debouncedSearch || undefined, page, pageSize: 10 },
@@ -76,7 +77,10 @@ export default function Employees() {
         toast({ title: "Employee deleted successfully" });
         setDeleteConfirmOpen(false);
         setEmployeeToDelete(null);
-        queryClient.invalidateQueries({ queryKey: getListEmployeesQueryKey() });
+        queryClient.invalidateQueries({
+          predicate: (query) =>
+            Array.isArray(query.queryKey) && query.queryKey[0] === "/api/employees",
+        });
       },
       onError: () => {
         toast({
