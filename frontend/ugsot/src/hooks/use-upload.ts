@@ -14,6 +14,7 @@ export function useUploadEmployeeFile() {
 
       const res = await fetch("/api/employees/upload", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
@@ -56,6 +57,7 @@ export function useUploadNewsletter() {
 
       const res = await fetch("/api/newsletters/upload", {
         method: "POST",
+        credentials: "include",
         body: formData,
       });
 
