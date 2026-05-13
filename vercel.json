@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "buildCommand": "pnpm run build",
+  "buildCommand": "pnpm run vercel-build",
   "outputDirectory": "frontend/ugsot/dist/public",
   "functions": {
     "api/**/*.ts": {

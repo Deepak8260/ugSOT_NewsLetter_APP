@@ -7,6 +7,7 @@
     "preinstall": "node -e \"const ua=process.env.npm_config_user_agent||'';if(!ua.startsWith('pnpm/')){console.error('Use pnpm instead');process.exit(1)}\"",
     "dev": "concurrently -k -n api,vite,gateway -c blue,magenta,green \"cross-env PORT=3001 pnpm --filter @workspace/api-server run dev\" \"cross-env PORT=5173 pnpm --filter @workspace/ugsot run dev\" \"pnpm --filter web dev\"",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
+    "vercel-build": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile && pnpm run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./frontend/**\" --filter \"./scripts\" --if-present run typecheck"
   },
