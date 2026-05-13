@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import multer from "multer";
-import { Storage } from "@google-cloud/storage";
+import { createClient } from "@supabase/supabase-js";
 import { db, newslettersTable, employeesTable, emailLogsTable } from "@workspace/db";
 import { eq, count, sql, desc } from "drizzle-orm";
 import { requireAuth } from "../middlewares/requireAuth";
@@ -10,17 +10,54 @@ import { randomUUID } from "crypto";
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
-const storage = new Storage();
-const BUCKET_ID = process.env.DEFAULT_OBJECT_STORAGE_BUCKET_ID ?? "";
-const PRIVATE_DIR = process.env.PRIVATE_OBJECT_DIR ?? "objects";
+const SUPABASE_URL = process.env.SUPABASE_URL ?? "";
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const SUPABASE_STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET ?? "";
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_STORAGE_BUCKET) {
+  throw new Error("SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_STORAGE_BUCKET are required");
+}
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false },
+});
+
+function normalizeStoragePath(value: string): string {
+  if (value.startsWith("newsletters/")) return value;
+  const filename = value.split("/").pop() ?? "";
+  if (!filename) {
+    throw new Error("Invalid storage path");
+  }
+  return `newsletters/${filename}`;
+}
 
 async function uploadPdfToStorage(buffer: Buffer, originalName: string): Promise<string> {
   const id = randomUUID();
-  const objectPath = `${PRIVATE_DIR}/newsletters/${id}-${originalName}`;
-  const bucket = storage.bucket(BUCKET_ID);
-  const file = bucket.file(objectPath);
-  await file.save(buffer, { contentType: "application/pdf", resumable: false });
-  return `/objects/newsletters/${id}-${originalName}`;
+  const safeName = originalName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storagePath = `newsletters/${id}-${safeName}`;
+
+  const { error } = await supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .upload(storagePath, buffer, { contentType: "application/pdf", upsert: false });
+
+  if (error) {
+    throw new Error(`Supabase storage upload failed: ${error.message}`);
+  }
+
+  return storagePath;
+}
+
+async function downloadPdfBuffer(storagePath: string): Promise<Buffer> {
+  const { data, error } = await supabase.storage
+    .from(SUPABASE_STORAGE_BUCKET)
+    .download(normalizeStoragePath(storagePath));
+
+  if (error || !data) {
+    throw new Error(`Supabase storage download failed: ${error?.message ?? "No data"}`);
+  }
+
+  const arrayBuffer = await data.arrayBuffer();
+  return Buffer.from(arrayBuffer);
 }
 
 async function sendNewsletterEmails(
@@ -42,12 +79,9 @@ async function sendNewsletterEmails(
         try {
           let pdfAttachment: { filename: string; content: string } | null = null;
 
-          if (RESEND_API_KEY && BUCKET_ID) {
+          if (RESEND_API_KEY) {
             try {
-              const objectPath = newsletter.pdfUrl.replace(/^\/objects\//, `${PRIVATE_DIR}/`);
-              const bucket = storage.bucket(BUCKET_ID);
-              const file = bucket.file(objectPath);
-              const [pdfBuffer] = await file.download();
+              const pdfBuffer = await downloadPdfBuffer(newsletter.pdfUrl);
               pdfAttachment = {
                 filename: `ugSOT-Newsletter-${newsletter.topic}.pdf`,
                 content: pdfBuffer.toString("base64"),
@@ -265,6 +299,14 @@ router.delete("/newsletters/:id", requireAuth, async (req, res): Promise<void> =
 
   const [deleted] = await db.delete(newslettersTable).where(eq(newslettersTable.id, id)).returning();
   if (!deleted) { res.status(404).json({ error: "Newsletter not found" }); return; }
+
+  try {
+    const storagePath = normalizeStoragePath(deleted.pdfUrl);
+    await supabase.storage.from(SUPABASE_STORAGE_BUCKET).remove([storagePath]);
+  } catch (err) {
+    req.log.warn({ err }, "Failed to remove PDF from Supabase storage");
+  }
+
   res.json({ message: "Newsletter deleted" });
 });
 
@@ -295,12 +337,16 @@ router.get("/newsletters/:id/pdf", requireAuth, async (req, res): Promise<void> 
   if (!newsletter) { res.status(404).json({ error: "Newsletter not found" }); return; }
 
   try {
-    const objectPath = newsletter.pdfUrl.replace(/^\/objects\//, `${PRIVATE_DIR}/`);
-    const bucket = storage.bucket(BUCKET_ID);
-    const file = bucket.file(objectPath);
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="newsletter-${id}.pdf"`);
-    file.createReadStream().pipe(res as unknown as NodeJS.WritableStream);
+    const storagePath = normalizeStoragePath(newsletter.pdfUrl);
+    const { data, error } = await supabase.storage
+      .from(SUPABASE_STORAGE_BUCKET)
+      .createSignedUrl(storagePath, 60 * 10);
+    if (error || !data?.signedUrl) {
+      req.log.error({ error }, "Failed to create signed URL");
+      res.status(500).json({ error: "Failed to download PDF" });
+      return;
+    }
+    res.redirect(data.signedUrl);
   } catch (err) {
     req.log.error({ err }, "Failed to stream PDF");
     res.status(500).json({ error: "Failed to download PDF" });
