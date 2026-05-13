@@ -1,11 +1,10 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
-import {
-  RequestUploadUrlBody,
-  RequestUploadUrlResponse,
-} from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { ObjectPermission } from "../lib/objectAcl";
+
+type UploadUrlBody = { name: string; size?: number; contentType?: string };
+type UploadUrlResponse = { uploadURL: string; objectPath: string; metadata: UploadUrlBody };
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -18,25 +17,20 @@ const objectStorageService = new ObjectStorageService();
  * Then uploads the file directly to the returned presigned URL.
  */
 router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
-  const parsed = RequestUploadUrlBody.safeParse(req.body);
-  if (!parsed.success) {
+  const body = req.body as UploadUrlBody;
+  if (!body.name) {
     res.status(400).json({ error: "Missing or invalid required fields" });
     return;
   }
 
   try {
-    const { name, size, contentType } = parsed.data;
+    const { name, size, contentType } = body;
 
     const uploadURL = await objectStorageService.getObjectEntityUploadURL();
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
-    res.json(
-      RequestUploadUrlResponse.parse({
-        uploadURL,
-        objectPath,
-        metadata: { name, size, contentType },
-      }),
-    );
+    const response: UploadUrlResponse = { uploadURL, objectPath, metadata: { name, size, contentType } };
+    res.json(response);
   } catch (error) {
     req.log.error({ err: error }, "Error generating upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });

@@ -37,7 +37,7 @@ router.post("/auth/login", async (req, res): Promise<void> => {
     return;
   }
 
-  (req.session as Record<string, unknown>).adminEmail = email;
+  (req.session as unknown as Record<string, unknown>).adminEmail = email;
   req.log.info({ email }, "Admin logged in");
   res.json({ email, loggedIn: true });
 });
@@ -52,7 +52,7 @@ router.post("/auth/logout", (req, res): void => {
 });
 
 router.get("/auth/me", (req, res): void => {
-  const adminEmail = (req.session as Record<string, unknown>).adminEmail as string | undefined;
+  const adminEmail = (req.session as unknown as Record<string, unknown>).adminEmail as string | undefined;
   if (!adminEmail) {
     res.status(401).json({ error: "Not authenticated" });
     return;

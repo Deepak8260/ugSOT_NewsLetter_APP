@@ -1,44 +1,74 @@
-# [Project name]
+# ugSOT Newsletter Management System
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+An internal admin web application for upGrad School Of Technology (ugSOT) to manage and distribute company newsletters to all employees via email.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
+- `pnpm --filter @workspace/ugsot run dev` — run the frontend (port 23162)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Frontend: React + Vite + shadcn/ui + Tailwind CSS + wouter + TanStack Query
+- API: Express 5 + session-based auth
 - DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
+- File storage: Replit Object Storage (Google Cloud Storage) for newsletter PDFs
+- Email: Resend API
+- Excel parsing: SheetJS (xlsx)
+- Validation: Zod, drizzle-zod
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — OpenAPI contract (source of truth)
+- `lib/db/src/schema/` — Drizzle DB schema (employees, newsletters, emailLogs)
+- `artifacts/api-server/src/routes/` — Express route handlers
+- `artifacts/ugsot/src/` — React frontend
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Session-based admin auth (no OAuth, no multi-user). Credentials stored in `ADMIN_EMAIL` + `ADMIN_PASSWORD` env vars.
+- Newsletter PDFs uploaded server-side via multer, then stored to GCS object storage bucket.
+- Email sending uses Resend API with HTML template + PDF attachment. Falls back to simulated send if `RESEND_API_KEY` not set.
+- Multipart file upload endpoints (`/api/employees/upload`, `/api/newsletters/upload`) are handled outside OpenAPI codegen — frontend calls them with raw `fetch` + `FormData`.
+- Bulk email sends batched in groups of 10 to avoid rate limits.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Admin login → protected dashboard
+- Dashboard: stats overview (employees, newsletters, emails sent, delivery rate) + recent newsletters
+- Employees: upload Excel/CSV, search, paginate, delete
+- Newsletters: upload PDF + metadata, send to all employees, view delivery stats, download PDF, delete
+- Email Logs: filterable table by newsletter and delivery status
+- Settings: session info + logout
+
+## Required secrets
+
+- `SESSION_SECRET` — Express session secret (already set)
+- `ADMIN_EMAIL` — Admin login email
+- `ADMIN_PASSWORD` — Admin login password (plaintext)
+- `DATABASE_URL` — PostgreSQL connection string (auto-provisioned)
+- `DEFAULT_OBJECT_STORAGE_BUCKET_ID` — GCS bucket for PDFs (auto-provisioned)
+- `RESEND_API_KEY` — Resend API key for sending emails
+- `FROM_EMAIL` — (optional) sender email address, defaults to `newsletter@ugsot.com`
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Simple, clean, professional corporate UI — no emojis, no flashy animations
+- Dark navy primary color palette
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Always run `pnpm --filter @workspace/api-spec run codegen` after changing `openapi.yaml`
+- Always run `pnpm --filter @workspace/db run push` after changing schema files
+- `RESEND_API_KEY` must be set for real email sending; without it the system logs emails as "sent" without actually sending
+- The `FROM_EMAIL` must be a verified domain in your Resend account
 
 ## Pointers
 
