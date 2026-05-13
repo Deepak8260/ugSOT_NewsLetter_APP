@@ -22,12 +22,14 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+// ---------------------------------------------------------------------------
+// Storage helpers
+// ---------------------------------------------------------------------------
+
 function normalizeStoragePath(value: string): string {
   if (value.startsWith("newsletters/")) return value;
   const filename = value.split("/").pop() ?? "";
-  if (!filename) {
-    throw new Error("Invalid storage path");
-  }
+  if (!filename) throw new Error("Invalid storage path");
   return `newsletters/${filename}`;
 }
 
@@ -40,76 +42,245 @@ async function uploadPdfToStorage(buffer: Buffer, originalName: string): Promise
     .from(SUPABASE_STORAGE_BUCKET)
     .upload(storagePath, buffer, { contentType: "application/pdf", upsert: false });
 
-  if (error) {
-    throw new Error(`Supabase storage upload failed: ${error.message}`);
-  }
-
+  if (error) throw new Error(`Supabase storage upload failed: ${error.message}`);
   return storagePath;
 }
 
 async function downloadPdfBuffer(storagePath: string): Promise<Buffer> {
+  const normalized = normalizeStoragePath(storagePath);
+  logger.info({ storagePath: normalized, bucket: SUPABASE_STORAGE_BUCKET }, "Downloading PDF from Supabase");
+
   const { data, error } = await supabase.storage
     .from(SUPABASE_STORAGE_BUCKET)
-    .download(normalizeStoragePath(storagePath));
+    .download(normalized);
 
   if (error || !data) {
-    throw new Error(`Supabase storage download failed: ${error?.message ?? "No data"}`);
+    throw new Error(`Supabase storage download failed: ${error?.message ?? "No data returned"}`);
   }
 
-  const arrayBuffer = await data.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const buf = Buffer.from(await data.arrayBuffer());
+  logger.info({ bytes: buf.length }, "PDF downloaded successfully");
+  return buf;
 }
 
-async function buildEmailHtml(
+// ---------------------------------------------------------------------------
+// Email HTML builder
+// ---------------------------------------------------------------------------
+
+function buildEmailHtml(
   employeeName: string,
   employeeEmail: string,
   newsletter: { title: string; topic: string; description: string | null }
-): Promise<string> {
+): string {
   return `
+
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
-    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    .header { background: #1e3a6f; color: #ffffff; padding: 32px 40px; }
-    .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
-    .header p { margin: 8px 0 0; font-size: 13px; opacity: 0.8; }
-    .body { padding: 40px; color: #333333; }
-    .body p { font-size: 15px; line-height: 1.7; margin: 0 0 16px; }
-    .highlight { background: #f0f4ff; border-left: 4px solid #1e3a6f; padding: 16px 20px; margin: 24px 0; border-radius: 0 4px 4px 0; }
-    .highlight strong { color: #1e3a6f; font-size: 15px; }
-    .footer { background: #f8f8f8; padding: 24px 40px; border-top: 1px solid #eeeeee; font-size: 12px; color: #888888; text-align: center; }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f4f4f4;
+      font-family: Arial, sans-serif;
+      color: #333333;
+    }
+
+    .container {
+      max-width: 600px;
+      margin: 40px auto;
+      background: #ffffff;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+      border: 1px solid #eeeeee;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #c8102e, #e63946);
+      color: #ffffff;
+      padding: 36px 40px;
+      text-align: center;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+    }
+
+    .header p {
+      margin: 10px 0 0;
+      font-size: 14px;
+      opacity: 0.9;
+    }
+
+    .body {
+      padding: 40px;
+    }
+
+    .body p {
+      font-size: 15px;
+      line-height: 1.8;
+      margin: 0 0 18px;
+      color: #444444;
+    }
+
+    .highlight {
+      background: #fff5f5;
+      border-left: 5px solid #c8102e;
+      padding: 20px;
+      margin: 28px 0;
+      border-radius: 8px;
+    }
+
+    .highlight strong {
+      display: block;
+      color: #c8102e;
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+
+    .topic {
+      font-size: 14px;
+      color: #666666;
+      margin-bottom: 10px;
+    }
+
+    .description {
+      font-size: 14px;
+      color: #555555;
+      line-height: 1.7;
+    }
+
+    .cta {
+      margin-top: 28px;
+      padding: 18px;
+      background: #fafafa;
+      border-radius: 8px;
+      text-align: center;
+      font-size: 14px;
+      color: #555555;
+      border: 1px solid #eeeeee;
+    }
+
+    .footer {
+      background: #c8102e;
+      color: rgba(255,255,255,0.85);
+      padding: 22px 30px;
+      text-align: center;
+      font-size: 12px;
+      line-height: 1.7;
+    }
+
+    .footer strong {
+      color: #ffffff;
+    }
+
+    @media only screen and (max-width: 600px) {
+      .container {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .header,
+      .body,
+      .footer {
+        padding: 24px;
+      }
+
+      .header h1 {
+        font-size: 24px;
+      }
+    }
   </style>
 </head>
+
 <body>
   <div class="container">
+
     <div class="header">
       <h1>ugSOT Newsletter</h1>
       <p>upGrad School Of Technology</p>
     </div>
+
     <div class="body">
+
       <p>Dear ${employeeName},</p>
-      <p>We hope you are doing well.</p>
-      <p>Please find attached the latest edition of the ugSOT Newsletter:</p>
+
+      <p>
+        We hope you are doing well.
+      </p>
+
+      <p>
+        Please find attached the latest edition of the
+        <strong>ugSOT Newsletter</strong>.
+      </p>
+
       <div class="highlight">
-        <strong>${newsletter.title}</strong><br>
-        <span style="color:#555;font-size:13px;">${newsletter.topic}</span>
-        ${newsletter.description ? `<p style="margin:8px 0 0;font-size:14px;color:#444;">${newsletter.description}</p>` : ""}
+        <strong>${newsletter.title}</strong>
+
+        <div class="topic">
+          ${newsletter.topic}
+        </div>
+
+        ${
+          newsletter.description
+            ? `<div class="description">${newsletter.description}</div>`
+            : ""
+        }
       </div>
-      <p>This newsletter contains important updates, announcements, and learning highlights from upGrad School Of Technology.</p>
-      <p>We encourage you to go through the newsletter and stay updated.</p>
-      <p>Best Regards,<br><strong>upGrad School Of Technology</strong></p>
+
+      <p>
+        This newsletter contains important updates, announcements,
+        learning highlights, and insights from
+        <strong>upGrad School Of Technology</strong>.
+      </p>
+
+      <div class="cta">
+        We encourage you to explore the attached newsletter and stay updated
+        with the latest happenings at ugSOT.
+      </div>
+
+      <p style="margin-top:32px;">
+        Best Regards,<br>
+        <strong>upGrad School Of Technology</strong>
+      </p>
+
     </div>
+
     <div class="footer">
-      &copy; ${new Date().getFullYear()} upGrad School Of Technology. This email was sent to ${employeeEmail}.
+      © ${new Date().getFullYear()} <strong>upGrad School Of Technology</strong><br>
+      This email was sent to ${employeeEmail}
     </div>
+
   </div>
 </body>
 </html>
   `.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Core send function
+// ---------------------------------------------------------------------------
+
+// Resend attachment shape — content must be a base64 string AND the key is
+// "content" (not "data"). The type field tells the mail client how to present it.
+interface ResendAttachment {
+  filename: string;
+  content: string;      // base64-encoded file bytes
+  contentType: string;  // MIME type (Resend uses "contentType", not "type")
+}
+
+interface ResendEmailPayload {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  attachments?: ResendAttachment[];
 }
 
 async function sendNewsletterEmails(
@@ -120,7 +291,7 @@ async function sendNewsletterEmails(
   const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
   const FROM_EMAIL = process.env.FROM_EMAIL ?? "newsletter@ugsot.com";
 
-  // Use custom emails if provided, otherwise fetch employees
+  // Build recipient list
   let recipients: Array<{ employeeEmail: string; employeeName: string }>;
   if (customEmails && customEmails.length > 0) {
     recipients = customEmails.map((email) => ({
@@ -134,8 +305,8 @@ async function sendNewsletterEmails(
   let sent = 0;
   let failed = 0;
 
+  // Simulate send when no API key is present
   if (!RESEND_API_KEY) {
-    // ✅ Fix: use module-level `logger` instead of `req.log`
     logger.warn("RESEND_API_KEY not set — simulating email send to %d recipients", recipients.length);
     await db.insert(emailLogsTable).values(
       recipients.map((r) => ({
@@ -147,67 +318,81 @@ async function sendNewsletterEmails(
     return { sent: recipients.length, failed: 0 };
   }
 
-  // Download PDF once and reuse for all emails
-  let pdfAttachment: { filename: string; content: string } | null = null;
+  // -----------------------------------------------------------------------
+  // Download PDF once and build attachment object (reused for every email)
+  // -----------------------------------------------------------------------
+  let pdfAttachment: ResendAttachment | null = null;
   try {
     const pdfBuffer = await downloadPdfBuffer(newsletter.pdfUrl);
+
+    // Sanitise topic for use as a filename
+    const safeTopic = newsletter.topic.replace(/[^a-zA-Z0-9._-]/g, "_");
+
     pdfAttachment = {
-      filename: `ugSOT-Newsletter-${newsletter.topic}.pdf`,
-      content: pdfBuffer.toString("base64"),
+      filename: `ugSOT-Newsletter-${safeTopic}.pdf`,
+      content: pdfBuffer.toString("base64"),   // ← must be base64 string
+      contentType: "application/pdf",           // ← correct property name for Resend
     };
+
+    logger.info(
+      { filename: pdfAttachment.filename, base64Chars: pdfAttachment.content.length },
+      "PDF attachment ready"
+    );
   } catch (err) {
-    logger.warn({ err }, "Failed to download PDF for attachment");
+    // Log as ERROR (not warn) so it surfaces clearly in your terminal
+    logger.error({ err, pdfUrl: newsletter.pdfUrl }, "PDF download FAILED — emails will be sent without attachment");
   }
 
-  const BATCH_SIZE = 100;
-
-  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-    const batch = recipients.slice(i, i + BATCH_SIZE);
-
-    // ✅ Fix: build the array of email request objects for Resend's batch endpoint
-    const batchPayload = await Promise.all(
-      batch.map(async (recipient) => {
-        const html = await buildEmailHtml(recipient.employeeName, recipient.employeeEmail, newsletter);
-        return {
-          from: FROM_EMAIL,
-          to: [recipient.employeeEmail], // Resend expects `to` as an array
-          subject: `ugSOT Newsletter | ${newsletter.topic}`,
-          html,
-          ...(pdfAttachment && { attachments: [pdfAttachment] }),
-        };
-      })
-    );
-
+  // -----------------------------------------------------------------------
+  // Send emails individually (batch API does NOT support attachments)
+  // -----------------------------------------------------------------------
+  for (const recipient of recipients) {
     try {
-      const response = await fetch("https://api.resend.com/emails/batch", {
+      const emailPayload: ResendEmailPayload = {
+        from: FROM_EMAIL,
+        to: [recipient.employeeEmail],
+        subject: `ugSOT Newsletter | ${newsletter.topic}`,
+        html: buildEmailHtml(recipient.employeeName, recipient.employeeEmail, newsletter),
+        // Only spread attachments when the PDF was successfully downloaded
+        ...(pdfAttachment ? { attachments: [pdfAttachment] } : {}),
+      };
+
+      logger.info(
+        { newsletterId, recipient: recipient.employeeEmail, hasAttachment: !!pdfAttachment },
+        "Sending email via Resend"
+      );
+
+      const response = await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${RESEND_API_KEY}`,
           "Content-Type": "application/json",
         },
-        // ✅ Fix: batchPayload is already an array — Resend requires the body to be a raw array
-        body: JSON.stringify(batchPayload),
+        body: JSON.stringify(emailPayload),
       });
 
+      const responseBody = await response.json().catch(() => ({})) as {
+        id?: string;
+        statusCode?: number;
+        message?: string;
+        name?: string;
+      };
+
       if (response.ok) {
-        // ✅ Fix: Resend batch response shape is { data: Array<{ id: string }> }
-        const result = (await response.json()) as { data: Array<{ id?: string; error?: string }> };
-        logger.info({ newsletterId, batchIndex: i }, "Resend batch response received");
-
-        for (let j = 0; j < batch.length; j++) {
-          const recipient = batch[j];
-          const emailResult = result.data?.[j];
-
-          if (emailResult?.id) {
-            await db.insert(emailLogsTable).values({
-              employeeEmail: recipient.employeeEmail,
-              newsletterId,
-              deliveryStatus: "sent",
-            });
-            sent++;
-          } else {
-            const errorMessage = emailResult?.error ?? "No email ID returned from batch send";
-            logger.error({ recipient: recipient.employeeEmail, errorMessage }, "Failed to send email in batch");
+        logger.info({ newsletterId, recipient: recipient.employeeEmail, responseBody }, "Resend email response received");
+        if (responseBody.id) {
+          await db.insert(emailLogsTable).values({
+            employeeEmail: recipient.employeeEmail,
+            newsletterId,
+            deliveryStatus: "sent",
+          });
+          sent++;
+        } else {
+            const errorMessage = "No email ID returned from Resend";
+            logger.error(
+              { recipient: recipient.employeeEmail, errorMessage, responseBody },
+              "Email failed"
+            );
             await db.insert(emailLogsTable).values({
               employeeEmail: recipient.employeeEmail,
               newsletterId,
@@ -216,27 +401,12 @@ async function sendNewsletterEmails(
             });
             failed++;
           }
-        }
       } else {
-        const errData = await response.json().catch(() => ({}));
-        logger.error({ errData, status: response.status }, "Resend batch API error");
-        const errMsg = JSON.stringify(errData);
-
-        for (const recipient of batch) {
-          await db.insert(emailLogsTable).values({
-            employeeEmail: recipient.employeeEmail,
-            newsletterId,
-            deliveryStatus: "failed",
-            errorMessage: errMsg,
-          });
-          failed++;
-        }
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ err, newsletterId }, "Unexpected error during batch send");
-
-      for (const recipient of batch) {
+        const errMsg = JSON.stringify(responseBody);
+        logger.error(
+          { status: response.status, errMsg, newsletterId, recipient: recipient.employeeEmail },
+          "Resend API rejected the request"
+        );
         await db.insert(emailLogsTable).values({
           employeeEmail: recipient.employeeEmail,
           newsletterId,
@@ -245,11 +415,25 @@ async function sendNewsletterEmails(
         });
         failed++;
       }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, newsletterId, recipient: recipient.employeeEmail }, "Unexpected error during email send");
+      await db.insert(emailLogsTable).values({
+        employeeEmail: recipient.employeeEmail,
+        newsletterId,
+        deliveryStatus: "failed",
+        errorMessage: errMsg,
+      });
+      failed++;
     }
   }
 
   return { sent, failed };
 }
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
 router.get("/newsletters", requireAuth, async (req, res): Promise<void> => {
   const { page = "1", pageSize = "20" } = req.query as Record<string, string>;
@@ -288,12 +472,10 @@ router.post("/newsletters/upload", requireAuth, upload.single("pdf"), async (req
     res.status(400).json({ error: "Title and topic are required" });
     return;
   }
-
   if (!req.file) {
     res.status(400).json({ error: "PDF file is required" });
     return;
   }
-
   if (req.file.mimetype !== "application/pdf") {
     res.status(400).json({ error: "Only PDF files are allowed" });
     return;
@@ -369,10 +551,11 @@ router.post("/newsletters/:id/send", requireAuth, async (req, res): Promise<void
   if (!newsletter) { res.status(404).json({ error: "Newsletter not found" }); return; }
 
   const { emails } = (req.body ?? {}) as { emails?: string[] };
+  const cleanEmails = emails?.filter((e) => typeof e === "string" && e.trim().length > 0);
 
   let total: number;
-  if (emails && Array.isArray(emails) && emails.length > 0) {
-    total = emails.length;
+  if (cleanEmails && cleanEmails.length > 0) {
+    total = cleanEmails.length;
     req.log.info({ newsletterId: id, customEmails: total }, "Starting newsletter send to custom recipients");
   } else {
     const [{ count: empCount }] = await db.select({ count: count() }).from(employeesTable);
@@ -380,7 +563,6 @@ router.post("/newsletters/:id/send", requireAuth, async (req, res): Promise<void
     req.log.info({ newsletterId: id, employees: total }, "Starting newsletter send to all employees");
   }
 
-  const cleanEmails = emails?.filter((e) => typeof e === "string" && e.trim().length > 0);
   const { sent, failed } = await sendNewsletterEmails(id, newsletter, cleanEmails);
   req.log.info({ newsletterId: id, sent, failed }, "Newsletter send complete");
 
@@ -400,6 +582,7 @@ router.get("/newsletters/:id/pdf", requireAuth, async (req, res): Promise<void> 
     const { data, error } = await supabase.storage
       .from(SUPABASE_STORAGE_BUCKET)
       .createSignedUrl(storagePath, 60 * 10);
+
     if (error || !data?.signedUrl) {
       req.log.error({ error }, "Failed to create signed URL");
       res.status(500).json({ error: "Failed to download PDF" });
