@@ -1,22 +1,30 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: ugSOT Newsletter Management API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Admin authentication
+  - name: employees
+    description: Employee management
+  - name: newsletters
+    description: Newsletter management
+  - name: email-logs
+    description: Email log management
+  - name: dashboard
+    description: Dashboard statistics
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,230 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Admin login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSession"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Admin logout
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current admin session
+      responses:
+        "200":
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSession"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /employees:
+    get:
+      operationId: listEmployees
+      tags: [employees]
+      summary: List all employees
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Employees list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeListResponse"
+
+  /employees/{id}:
+    delete:
+      operationId: deleteEmployee
+      tags: [employees]
+      summary: Delete an employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /newsletters:
+    get:
+      operationId: listNewsletters
+      tags: [newsletters]
+      summary: List all newsletters
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Newsletter list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NewsletterListResponse"
+
+  /newsletters/{id}:
+    get:
+      operationId: getNewsletter
+      tags: [newsletters]
+      summary: Get newsletter by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Newsletter
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Newsletter"
+    delete:
+      operationId: deleteNewsletter
+      tags: [newsletters]
+      summary: Delete a newsletter
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageResponse"
+
+  /newsletters/{id}/send:
+    post:
+      operationId: sendNewsletter
+      tags: [newsletters]
+      summary: Send newsletter to all employees
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Send result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendResult"
+
+  /email-logs:
+    get:
+      operationId: listEmailLogs
+      tags: [email-logs]
+      summary: List email logs
+      parameters:
+        - name: newsletterId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [sent, failed, pending]
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Email logs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailLogListResponse"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +266,184 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required:
+        - message
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AdminSession:
+      type: object
+      required: [email, loggedIn]
+      properties:
+        email:
+          type: string
+        loggedIn:
+          type: boolean
+
+    Employee:
+      type: object
+      required: [id, employeeName, employeeEmail, createdAt]
+      properties:
+        id:
+          type: integer
+        employeeName:
+          type: string
+        employeeEmail:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    EmployeeListResponse:
+      type: object
+      required: [employees, total, page, pageSize]
+      properties:
+        employees:
+          type: array
+          items:
+            $ref: "#/components/schemas/Employee"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    EmployeeUploadResult:
+      type: object
+      required: [added, skipped, invalid, errors]
+      properties:
+        added:
+          type: integer
+        skipped:
+          type: integer
+        invalid:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+
+    Newsletter:
+      type: object
+      required: [id, title, topic, pdfUrl, uploadedAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        topic:
+          type: string
+        description:
+          type: ["string", "null"]
+        pdfUrl:
+          type: string
+        uploadedAt:
+          type: string
+          format: date-time
+        totalSent:
+          type: ["integer", "null"]
+        totalFailed:
+          type: ["integer", "null"]
+
+    NewsletterListResponse:
+      type: object
+      required: [newsletters, total, page, pageSize]
+      properties:
+        newsletters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Newsletter"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    SendResult:
+      type: object
+      required: [sent, failed, total]
+      properties:
+        sent:
+          type: integer
+        failed:
+          type: integer
+        total:
+          type: integer
+
+    EmailLog:
+      type: object
+      required: [id, employeeEmail, newsletterId, deliveryStatus, sentAt]
+      properties:
+        id:
+          type: integer
+        employeeEmail:
+          type: string
+        newsletterId:
+          type: integer
+        newsletterTitle:
+          type: ["string", "null"]
+        deliveryStatus:
+          type: string
+          enum: [sent, failed, pending]
+        sentAt:
+          type: string
+          format: date-time
+        errorMessage:
+          type: ["string", "null"]
+
+    EmailLogListResponse:
+      type: object
+      required: [logs, total, page, pageSize]
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmailLog"
+        total:
+          type: integer
+        page:
+          type: integer
+        pageSize:
+          type: integer
+
+    DashboardStats:
+      type: object
+      required: [totalEmployees, totalNewsletters, totalEmailsSent, totalEmailsFailed, deliveryRate, recentNewsletters]
+      properties:
+        totalEmployees:
+          type: integer
+        totalNewsletters:
+          type: integer
+        totalEmailsSent:
+          type: integer
+        totalEmailsFailed:
+          type: integer
+        deliveryRate:
+          type: number
+        recentNewsletters:
+          type: array
+          items:
+            $ref: "#/components/schemas/Newsletter"

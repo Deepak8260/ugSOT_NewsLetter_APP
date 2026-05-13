@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "ugSOT Newsletter Admin"
+version = "1.0.0"
+id = "artifacts/ugsot"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23162
+
+[services.development]
+run = "pnpm --filter @workspace/ugsot run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ugsot", "run", "build" ]
+publicDir = "artifacts/ugsot/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23162"
+BASE_PATH = "/"
