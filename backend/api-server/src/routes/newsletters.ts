@@ -60,53 +60,12 @@ async function downloadPdfBuffer(storagePath: string): Promise<Buffer> {
   return Buffer.from(arrayBuffer);
 }
 
-async function sendNewsletterEmails(
-  newsletterId: number,
-  newsletter: { title: string; topic: string; description: string | null; pdfUrl: string }
-): Promise<{ sent: number; failed: number }> {
-  const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
-  const FROM_EMAIL = process.env.FROM_EMAIL ?? "newsletter@ugsot.com";
-
-  const employees = await db.select().from(employeesTable);
-  let sent = 0;
-  let failed = 0;
-
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < employees.length; i += BATCH_SIZE) {
-    const batch = employees.slice(i, i + BATCH_SIZE);
-    await Promise.all(
-      batch.map(async (emp) => {
-        try {
-          let pdfAttachment: { filename: string; content: string } | null = null;
-
-          if (RESEND_API_KEY) {
-            try {
-              const pdfBuffer = await downloadPdfBuffer(newsletter.pdfUrl);
-              pdfAttachment = {
-                filename: `ugSOT-Newsletter-${newsletter.topic}.pdf`,
-                content: pdfBuffer.toString("base64"),
-              };
-            } catch (err) {
-              logger.warn({ err }, "Failed to download PDF for attachment");
-            }
-          }
-
-          if (!RESEND_API_KEY) {
-            logger.warn("RESEND_API_KEY not set — simulating email send");
-            await db.insert(emailLogsTable).values({
-              employeeEmail: emp.employeeEmail,
-              newsletterId,
-              deliveryStatus: "sent",
-            });
-            sent++;
-            return;
-          }
-
-          const emailBody: Record<string, unknown> = {
-            from: FROM_EMAIL,
-            to: emp.employeeEmail,
-            subject: `ugSOT Newsletter | ${newsletter.topic}`,
-            html: `
+async function buildEmailHtml(
+  employeeName: string,
+  employeeEmail: string,
+  newsletter: { title: string; topic: string; description: string | null }
+): Promise<string> {
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -132,7 +91,7 @@ async function sendNewsletterEmails(
       <p>upGrad School Of Technology</p>
     </div>
     <div class="body">
-      <p>Dear ${emp.employeeName},</p>
+      <p>Dear ${employeeName},</p>
       <p>We hope you are doing well.</p>
       <p>Please find attached the latest edition of the ugSOT Newsletter:</p>
       <div class="highlight">
@@ -145,57 +104,148 @@ async function sendNewsletterEmails(
       <p>Best Regards,<br><strong>upGrad School Of Technology</strong></p>
     </div>
     <div class="footer">
-      &copy; ${new Date().getFullYear()} upGrad School Of Technology. This email was sent to ${emp.employeeEmail}.
+      &copy; ${new Date().getFullYear()} upGrad School Of Technology. This email was sent to ${employeeEmail}.
     </div>
   </div>
 </body>
 </html>
-            `.trim(),
-          };
+  `.trim();
+}
 
-          if (pdfAttachment) {
-            emailBody.attachments = [pdfAttachment];
-          }
+async function sendNewsletterEmails(
+  newsletterId: number,
+  newsletter: { title: string; topic: string; description: string | null; pdfUrl: string },
+  customEmails?: string[]
+): Promise<{ sent: number; failed: number }> {
+  const RESEND_API_KEY = process.env.RESEND_API_KEY ?? "";
+  const FROM_EMAIL = process.env.FROM_EMAIL ?? "newsletter@ugsot.com";
 
-          const response = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${RESEND_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(emailBody),
-          });
+  // Use custom emails if provided, otherwise fetch employees
+  let recipients: Array<{ employeeEmail: string; employeeName: string }>;
+  if (customEmails && customEmails.length > 0) {
+    recipients = customEmails.map((email) => ({
+      employeeEmail: email,
+      employeeName: email.split("@")[0],
+    }));
+  } else {
+    recipients = await db.select().from(employeesTable);
+  }
 
-          if (response.ok) {
+  let sent = 0;
+  let failed = 0;
+
+  if (!RESEND_API_KEY) {
+    // ✅ Fix: use module-level `logger` instead of `req.log`
+    logger.warn("RESEND_API_KEY not set — simulating email send to %d recipients", recipients.length);
+    await db.insert(emailLogsTable).values(
+      recipients.map((r) => ({
+        employeeEmail: r.employeeEmail,
+        newsletterId,
+        deliveryStatus: "sent" as const,
+      }))
+    );
+    return { sent: recipients.length, failed: 0 };
+  }
+
+  // Download PDF once and reuse for all emails
+  let pdfAttachment: { filename: string; content: string } | null = null;
+  try {
+    const pdfBuffer = await downloadPdfBuffer(newsletter.pdfUrl);
+    pdfAttachment = {
+      filename: `ugSOT-Newsletter-${newsletter.topic}.pdf`,
+      content: pdfBuffer.toString("base64"),
+    };
+  } catch (err) {
+    logger.warn({ err }, "Failed to download PDF for attachment");
+  }
+
+  const BATCH_SIZE = 100;
+
+  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+    const batch = recipients.slice(i, i + BATCH_SIZE);
+
+    // ✅ Fix: build the array of email request objects for Resend's batch endpoint
+    const batchPayload = await Promise.all(
+      batch.map(async (recipient) => {
+        const html = await buildEmailHtml(recipient.employeeName, recipient.employeeEmail, newsletter);
+        return {
+          from: FROM_EMAIL,
+          to: [recipient.employeeEmail], // Resend expects `to` as an array
+          subject: `ugSOT Newsletter | ${newsletter.topic}`,
+          html,
+          ...(pdfAttachment && { attachments: [pdfAttachment] }),
+        };
+      })
+    );
+
+    try {
+      const response = await fetch("https://api.resend.com/emails/batch", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        // ✅ Fix: batchPayload is already an array — Resend requires the body to be a raw array
+        body: JSON.stringify(batchPayload),
+      });
+
+      if (response.ok) {
+        // ✅ Fix: Resend batch response shape is { data: Array<{ id: string }> }
+        const result = (await response.json()) as { data: Array<{ id?: string; error?: string }> };
+        logger.info({ newsletterId, batchIndex: i }, "Resend batch response received");
+
+        for (let j = 0; j < batch.length; j++) {
+          const recipient = batch[j];
+          const emailResult = result.data?.[j];
+
+          if (emailResult?.id) {
             await db.insert(emailLogsTable).values({
-              employeeEmail: emp.employeeEmail,
+              employeeEmail: recipient.employeeEmail,
               newsletterId,
               deliveryStatus: "sent",
             });
             sent++;
           } else {
-            const errData = await response.json().catch(() => ({}));
-            const errMsg = JSON.stringify(errData);
+            const errorMessage = emailResult?.error ?? "No email ID returned from batch send";
+            logger.error({ recipient: recipient.employeeEmail, errorMessage }, "Failed to send email in batch");
             await db.insert(emailLogsTable).values({
-              employeeEmail: emp.employeeEmail,
+              employeeEmail: recipient.employeeEmail,
               newsletterId,
               deliveryStatus: "failed",
-              errorMessage: errMsg,
+              errorMessage,
             });
             failed++;
           }
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
+        }
+      } else {
+        const errData = await response.json().catch(() => ({}));
+        logger.error({ errData, status: response.status }, "Resend batch API error");
+        const errMsg = JSON.stringify(errData);
+
+        for (const recipient of batch) {
           await db.insert(emailLogsTable).values({
-            employeeEmail: emp.employeeEmail,
+            employeeEmail: recipient.employeeEmail,
             newsletterId,
             deliveryStatus: "failed",
             errorMessage: errMsg,
           });
           failed++;
         }
-      })
-    );
+      }
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ err, newsletterId }, "Unexpected error during batch send");
+
+      for (const recipient of batch) {
+        await db.insert(emailLogsTable).values({
+          employeeEmail: recipient.employeeEmail,
+          newsletterId,
+          deliveryStatus: "failed",
+          errorMessage: errMsg,
+        });
+        failed++;
+      }
+    }
   }
 
   return { sent, failed };
@@ -318,11 +368,20 @@ router.post("/newsletters/:id/send", requireAuth, async (req, res): Promise<void
   const [newsletter] = await db.select().from(newslettersTable).where(eq(newslettersTable.id, id));
   if (!newsletter) { res.status(404).json({ error: "Newsletter not found" }); return; }
 
-  const employees = await db.select({ count: count() }).from(employeesTable);
-  const total = Number(employees[0].count);
+  const { emails } = (req.body ?? {}) as { emails?: string[] };
 
-  req.log.info({ newsletterId: id, total }, "Starting newsletter send");
-  const { sent, failed } = await sendNewsletterEmails(id, newsletter);
+  let total: number;
+  if (emails && Array.isArray(emails) && emails.length > 0) {
+    total = emails.length;
+    req.log.info({ newsletterId: id, customEmails: total }, "Starting newsletter send to custom recipients");
+  } else {
+    const [{ count: empCount }] = await db.select({ count: count() }).from(employeesTable);
+    total = Number(empCount);
+    req.log.info({ newsletterId: id, employees: total }, "Starting newsletter send to all employees");
+  }
+
+  const cleanEmails = emails?.filter((e) => typeof e === "string" && e.trim().length > 0);
+  const { sent, failed } = await sendNewsletterEmails(id, newsletter, cleanEmails);
   req.log.info({ newsletterId: id, sent, failed }, "Newsletter send complete");
 
   res.json({ sent, failed, total });

@@ -36,5 +36,10 @@ Then open **http://localhost:5173** (and keep `VITE_API_TARGET` pointing at your
 ## Notes
 
 - Newsletter PDFs use **Supabase Storage** (`SUPABASE_STORAGE_BUCKET`).
-- Set `RESEND_API_KEY` for real email; otherwise sends are simulated.
+- **Email sending:**
+  - Set `RESEND_API_KEY` for real email; otherwise sends are simulated.
+  - Configure `FROM_EMAIL` to send from any email address (default: `newsletter@example.com`).
+  - **Bulk send to all employees:** POST `/api/newsletters/:id/send` (no body) sends to all employees in the database.
+  - **Custom recipient list:** POST `/api/newsletters/:id/send` with body `{ "emails": ["email1@example.com", "email2@example.com"] }` to send to specific addresses.
+  - Batch API sends up to 100 emails per request (efficient).
 - Do not commit `.env` or real API keys.
