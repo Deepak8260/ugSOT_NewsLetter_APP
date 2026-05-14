@@ -436,33 +436,38 @@ async function sendNewsletterEmails(
 // ---------------------------------------------------------------------------
 
 router.get("/newsletters", requireAuth, async (req, res): Promise<void> => {
-  const { page = "1", pageSize = "20" } = req.query as Record<string, string>;
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
-  const offset = (pageNum - 1) * size;
+  try {
+    const { page = "1", pageSize = "20" } = req.query as Record<string, string>;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
+    const offset = (pageNum - 1) * size;
 
-  const [newsletters, [{ count: total }]] = await Promise.all([
-    db
-      .select({
-        id: newslettersTable.id,
-        title: newslettersTable.title,
-        topic: newslettersTable.topic,
-        description: newslettersTable.description,
-        pdfUrl: newslettersTable.pdfUrl,
-        uploadedAt: newslettersTable.uploadedAt,
-        totalSent: sql<number>`cast(count(case when ${emailLogsTable.deliveryStatus} = 'sent' then 1 end) as int)`,
-        totalFailed: sql<number>`cast(count(case when ${emailLogsTable.deliveryStatus} = 'failed' then 1 end) as int)`,
-      })
-      .from(newslettersTable)
-      .leftJoin(emailLogsTable, eq(newslettersTable.id, emailLogsTable.newsletterId))
-      .groupBy(newslettersTable.id)
-      .orderBy(desc(newslettersTable.uploadedAt))
-      .limit(size)
-      .offset(offset),
-    db.select({ count: count() }).from(newslettersTable),
-  ]);
+    const [newsletters, [{ count: total }]] = await Promise.all([
+      db
+        .select({
+          id: newslettersTable.id,
+          title: newslettersTable.title,
+          topic: newslettersTable.topic,
+          description: newslettersTable.description,
+          pdfUrl: newslettersTable.pdfUrl,
+          uploadedAt: newslettersTable.uploadedAt,
+          totalSent: sql<number>`cast(count(case when ${emailLogsTable.deliveryStatus} = 'sent' then 1 end) as int)`,
+          totalFailed: sql<number>`cast(count(case when ${emailLogsTable.deliveryStatus} = 'failed' then 1 end) as int)`,
+        })
+        .from(newslettersTable)
+        .leftJoin(emailLogsTable, eq(newslettersTable.id, emailLogsTable.newsletterId))
+        .groupBy(newslettersTable.id)
+        .orderBy(desc(newslettersTable.uploadedAt))
+        .limit(size)
+        .offset(offset),
+      db.select({ count: count() }).from(newslettersTable),
+    ]);
 
-  res.json({ newsletters, total: Number(total), page: pageNum, pageSize: size });
+    res.json({ newsletters, total: Number(total), page: pageNum, pageSize: size });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get newsletters");
+    res.status(500).json({ error: "Failed to get newsletters" });
+  }
 });
 
 router.post("/newsletters/upload", requireAuth, upload.single("pdf"), async (req, res): Promise<void> => {

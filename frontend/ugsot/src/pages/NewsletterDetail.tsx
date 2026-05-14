@@ -78,7 +78,7 @@ export default function NewsletterDetail() {
           </div>
           <div>
             <Button asChild variant="outline">
-              <a href={newsletter.pdfUrl} target="_blank" rel="noopener noreferrer">
+              <a href={`/api/newsletters/${newsletter.id}/pdf`} target="_blank" rel="noopener noreferrer">
                 <Download className="mr-2 h-4 w-4" />
                 Download PDF
               </a>

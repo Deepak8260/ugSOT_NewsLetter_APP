@@ -13,29 +13,34 @@ function isValidEmail(email: string): boolean {
 }
 
 router.get("/employees", requireAuth, async (req, res): Promise<void> => {
-  const { search, page = "1", pageSize = "20" } = req.query as Record<string, string>;
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
-  const offset = (pageNum - 1) * size;
+  try {
+    const { search, page = "1", pageSize = "20" } = req.query as Record<string, string>;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const size = Math.min(100, Math.max(1, parseInt(pageSize, 10) || 20));
+    const offset = (pageNum - 1) * size;
 
-  let query = db.select().from(employeesTable);
-  let countQuery = db.select({ count: count() }).from(employeesTable);
+    let query = db.select().from(employeesTable);
+    let countQuery = db.select({ count: count() }).from(employeesTable);
 
-  if (search) {
-    const filter = or(
-      ilike(employeesTable.employeeName, `%${search}%`),
-      ilike(employeesTable.employeeEmail, `%${search}%`)
-    );
-    query = query.where(filter) as typeof query;
-    countQuery = countQuery.where(filter) as typeof countQuery;
+    if (search) {
+      const filter = or(
+        ilike(employeesTable.employeeName, `%${search}%`),
+        ilike(employeesTable.employeeEmail, `%${search}%`)
+      );
+      query = query.where(filter) as typeof query;
+      countQuery = countQuery.where(filter) as typeof countQuery;
+    }
+
+    const [employees, [{ count: total }]] = await Promise.all([
+      query.limit(size).offset(offset).orderBy(employeesTable.createdAt),
+      countQuery,
+    ]);
+
+    res.json({ employees, total: Number(total), page: pageNum, pageSize: size });
+  } catch (err) {
+    req.log.error({ err }, "Failed to get employees");
+    res.status(500).json({ error: "Failed to get employees" });
   }
-
-  const [employees, [{ count: total }]] = await Promise.all([
-    query.limit(size).offset(offset).orderBy(employeesTable.createdAt),
-    countQuery,
-  ]);
-
-  res.json({ employees, total: Number(total), page: pageNum, pageSize: size });
 });
 
 router.delete("/employees/:id", requireAuth, async (req, res): Promise<void> => {
@@ -76,12 +81,19 @@ router.post("/employees/upload", requireAuth, upload.single("file"), async (req,
     return;
   }
 
+  req.log.info({ rowCount: rows.length, rows }, "Parsed employees from file");
+
   let added = 0;
   let skipped = 0;
   let invalid = 0;
   const errors: string[] = [];
 
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const rowIndex = i + 1;
+
+    req.log.info({ rowIndex, row }, "Processing row");
+
     const name = String(
       row["Employee Name"] ?? row["employee_name"] ?? row["Name"] ?? row["name"] ?? ""
     ).trim();
@@ -89,26 +101,38 @@ router.post("/employees/upload", requireAuth, upload.single("file"), async (req,
       row["Employee Email"] ?? row["employee_email"] ?? row["Email"] ?? row["email"] ?? ""
     ).trim().toLowerCase();
 
-    if (!name && !email) continue;
+    req.log.info({ rowIndex, name, email }, "Extracted name and email");
+
+    if (!name && !email) {
+      req.log.info({ rowIndex }, "Skipping empty row");
+      continue;
+    }
 
     if (!name || !email) {
       invalid++;
-      errors.push(`Row with name="${name}" email="${email}": missing required fields`);
+      const errorMsg = `Row ${rowIndex} with name="${name}" email="${email}": missing required fields`;
+      errors.push(errorMsg);
+      req.log.warn({ rowIndex, name, email }, errorMsg);
       continue;
     }
 
     if (!isValidEmail(email)) {
       invalid++;
-      errors.push(`Invalid email: ${email}`);
+      const errorMsg = `Row ${rowIndex}: Invalid email: ${email}`;
+      errors.push(errorMsg);
+      req.log.warn({ rowIndex, email }, errorMsg);
       continue;
     }
 
     try {
       await db.insert(employeesTable).values({ employeeName: name, employeeEmail: email }).onConflictDoNothing();
       added++;
+      req.log.info({ rowIndex, name, email }, "Added employee");
     } catch (err) {
       skipped++;
-      errors.push(`Duplicate email skipped: ${email}`);
+      const errorMsg = `Row ${rowIndex}: Duplicate email skipped: ${email}`;
+      errors.push(errorMsg);
+      req.log.warn({ rowIndex, email, err }, errorMsg);
     }
   }
 

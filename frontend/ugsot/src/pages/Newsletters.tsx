@@ -267,7 +267,7 @@ export default function Newsletters() {
                           size="icon"
                           asChild
                         >
-                          <a href={newsletter.pdfUrl} target="_blank" rel="noopener noreferrer">
+                          <a href={`/api/newsletters/${newsletter.id}/pdf`} target="_blank" rel="noopener noreferrer">
                             <Download className="h-4 w-4" />
                           </a>
                         </Button>
