@@ -132,7 +132,7 @@ function buildEmailHtml(
     .highlight {
       background: #fff5f5;
       border-left: 5px solid #c8102e;
-      padding: 20px;
+      padding: 24px;
       margin: 28px 0;
       border-radius: 8px;
     }
@@ -140,20 +140,21 @@ function buildEmailHtml(
     .highlight strong {
       display: block;
       color: #c8102e;
-      font-size: 18px;
-      margin-bottom: 6px;
+      font-size: 20px;
+      margin-bottom: 10px;
     }
 
     .topic {
-      font-size: 14px;
+      font-size: 15px;
       color: #666666;
-      margin-bottom: 10px;
+      font-weight: 600;
+      margin-bottom: 14px;
     }
 
     .description {
       font-size: 14px;
       color: #555555;
-      line-height: 1.7;
+      line-height: 1.8;
     }
 
     .cta {
@@ -165,6 +166,7 @@ function buildEmailHtml(
       font-size: 14px;
       color: #555555;
       border: 1px solid #eeeeee;
+      line-height: 1.7;
     }
 
     .footer {
@@ -178,6 +180,11 @@ function buildEmailHtml(
 
     .footer strong {
       color: #ffffff;
+    }
+
+    .footer a {
+      color: #ffffff;
+      text-decoration: none;
     }
 
     @media only screen and (max-width: 600px) {
@@ -195,6 +202,10 @@ function buildEmailHtml(
       .header h1 {
         font-size: 24px;
       }
+
+      .highlight {
+        padding: 20px;
+      }
     }
   </style>
 </head>
@@ -203,7 +214,7 @@ function buildEmailHtml(
   <div class="container">
 
     <div class="header">
-      <h1>ugSOT Newsletter</h1>
+      <h1>uGSOT Newsletter</h1>
       <p>upGrad School Of Technology</p>
     </div>
 
@@ -217,11 +228,14 @@ function buildEmailHtml(
 
       <p>
         Please find attached the latest edition of the
-        <strong>ugSOT Newsletter</strong>.
+        <strong>uGSOT Newsletter</strong>.
       </p>
 
       <div class="highlight">
-        <strong>${newsletter.title}</strong>
+
+        <strong>
+          ${newsletter.title}
+        </strong>
 
         <div class="topic">
           ${newsletter.topic}
@@ -234,15 +248,17 @@ function buildEmailHtml(
         }
       </div>
 
+      </div>
+
       <p>
-        This newsletter contains important updates, announcements,
-        learning highlights, and insights from
+        This newsletter also includes important updates, announcements,
+        learning highlights, and key insights from
         <strong>upGrad School Of Technology</strong>.
       </p>
 
       <div class="cta">
         We encourage you to explore the attached newsletter and stay updated
-        with the latest happenings at ugSOT.
+        with the latest happenings at uGSOT.
       </div>
 
       <p style="margin-top:32px;">
@@ -253,8 +269,13 @@ function buildEmailHtml(
     </div>
 
     <div class="footer">
-      © ${new Date().getFullYear()} <strong>upGrad School Of Technology</strong><br>
-      This email was sent to ${employeeEmail}
+      © ${new Date().getFullYear()}
+      <strong>upGrad School Of Technology</strong>
+      <br>
+      This email was sent to
+      <a href="mailto:${employeeEmail}">
+        ${employeeEmail}
+      </a>
     </div>
 
   </div>
