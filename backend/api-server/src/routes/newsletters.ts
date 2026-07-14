@@ -350,7 +350,7 @@ async function sendNewsletterEmails(
     const safeTopic = newsletter.topic.replace(/[^a-zA-Z0-9._-]/g, "_");
 
     pdfAttachment = {
-      filename: `ugSOT-Newsletter-${safeTopic}.pdf`,
+      filename: `uGSOT-Newsletter-${safeTopic}.pdf`,
       content: pdfBuffer.toString("base64"),   // ← must be base64 string
       contentType: "application/pdf",           // ← correct property name for Resend
     };
@@ -372,7 +372,7 @@ async function sendNewsletterEmails(
       const emailPayload: ResendEmailPayload = {
         from: FROM_EMAIL,
         to: [recipient.employeeEmail],
-        subject: `ugSOT Newsletter | ${newsletter.topic}`,
+        subject: `uGSOT Newsletter | ${newsletter.topic}`,
         html: buildEmailHtml(recipient.employeeName, recipient.employeeEmail, newsletter),
         // Only spread attachments when the PDF was successfully downloaded
         ...(pdfAttachment ? { attachments: [pdfAttachment] } : {}),
